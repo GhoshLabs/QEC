@@ -10,3 +10,13 @@ def depolarizing_noise(n, p):
             if r2 in ('X','Y'): eX[i] = 1
             if r2 in ('Z','Y'): eZ[i] = 1
     return eX, eZ
+
+def independent_XZ_noise(n, p):
+    eX = [0]*n
+    eZ = [0]*n
+    for i in range(n):
+        if random.random() < p:
+            eX[i] = 1
+        if random.random() < p:
+            eZ[i] = 1
+    return eX, eZ
