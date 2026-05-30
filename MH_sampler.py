@@ -171,6 +171,8 @@ def metropolis_hastings_avg_weight(eX_init, eZ_init, all_stabs, n_X_stabs, q_err
     
     total_weight = 0
     n_post_burn_in = 0
+    min_weight = np.inf
+    min_weight_configs = set()
 
     for i in range(n_samples):
         j = random.randrange(m_stab)
@@ -199,10 +201,15 @@ def metropolis_hastings_avg_weight(eX_init, eZ_init, all_stabs, n_X_stabs, q_err
         if i >= burn_in:
             total_weight += cur_weight
             n_post_burn_in += 1
+            if cur_weight < min_weight:
+                min_weight = cur_weight
+                min_weight_configs = { (tuple(cur_eX), tuple(cur_eZ)) }
+            elif cur_weight == min_weight:
+                min_weight_configs.add( (tuple(cur_eX), tuple(cur_eZ)) )
 
     avg_weight = total_weight / n_post_burn_in if n_post_burn_in > 0 else cur_weight
             
-    return avg_weight, best_eX, best_eZ
+    return avg_weight, min_weight, len(min_weight_configs), best_eX, best_eZ
 
 def metropolis_hastings_coset_probs(eX_init, eZ_init, all_stabs, n_X_stabs, q_error, n_samples, burn_in, logicals_X, logicals_Z):
     """
@@ -218,7 +225,6 @@ def metropolis_hastings_coset_probs(eX_init, eZ_init, all_stabs, n_X_stabs, q_er
     
     # Aggregated distribution across all chains
     aggregated_probs = np.zeros(num_classes)
-    min_weights = np.full(num_classes, np.inf)
 
     # 1. Run an independent chain for each logical class
     for s in range(num_classes):
@@ -259,19 +265,13 @@ def metropolis_hastings_coset_probs(eX_init, eZ_init, all_stabs, n_X_stabs, q_er
                     # Weight of the equivalent error configuration in sector k
                     transformed_weight = np.sum((cur_eX ^ lX_rel) | (cur_eZ ^ lZ_rel))
                     
-                    # Track minimum weight encountered for each class
-                    if transformed_weight < min_weights[k]:
-                        min_weights[k] = transformed_weight
-
                     # Probability ratio P(e_k) / P(e_s)
                     chain_Z_ratios[k] += np.exp((transformed_weight - cur_weight) * log_odds)
 
         if n_post_burn_in > 0:
-            # Normalize the distribution estimated by this specific chain
-            # This prevents chains stuck in high-weight sectors from dominating the aggregation
             chain_dist = chain_Z_ratios / n_post_burn_in
             total_chain_mass = np.sum(chain_dist)
             if total_chain_mass > 0:
                 aggregated_probs += (chain_dist / total_chain_mass)
     
-    return aggregated_probs, min_weights
+    return aggregated_probs

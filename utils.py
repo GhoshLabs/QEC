@@ -3,6 +3,18 @@ from itertools import product
 from scipy import sparse
 from qiskit.quantum_info import SparsePauliOp
 try:
+    from scipy.special import logsumexp
+except ImportError:
+    def logsumexp(a, axis=None, keepdims=False):
+        a = np.array(a)
+        a_max = np.max(a, axis=axis, keepdims=True)
+        if keepdims:
+            a_max2 = a_max
+        else:
+            a_max2 = np.squeeze(a_max, axis=axis)
+        summation = np.sum(np.exp(a - a_max), axis=axis)
+        return np.log(summation) + a_max2
+try:
     import pymatching
     _HAVE_PYMATCHING = True
 except Exception:
@@ -187,3 +199,90 @@ def generate_all_sectors(eX, eZ, code):
 
     eX_arr, eZ_arr = np.array(eX, dtype=int), np.array(eZ, dtype=int)
     return [(eX_arr ^ lX, eZ_arr ^ lZ) for lZ in lZ_combinations for lX in lX_combinations]
+
+def d_kl(probs_1, probs_2):
+    # Filter out zero probabilities to avoid division by zero or log(0)
+    mask = (probs_1 > 0) & (probs_2 > 0)
+    D_KL = np.sum(probs_1[mask] * np.log(probs_1[mask] / probs_2[mask]))
+    return D_KL
+
+
+def simpson_integral(x, y):
+    """Compute the integral of y(x) using composite Simpson's rule.
+
+    x and y must be 1D arrays of equal length, with x strictly increasing.
+    The number of points must be odd so that there are an even number of intervals.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError('x and y must be one-dimensional arrays.')
+    if x.shape != y.shape:
+        raise ValueError('x and y must have the same shape.')
+    n = x.size
+    if n < 2:
+        raise ValueError('At least two points are required for Simpson integration.')
+    if np.any(np.diff(x) <= 0):
+        raise ValueError('x values must be strictly increasing.')
+    if n % 2 == 0:
+        raise ValueError('Simpson integration requires an odd number of points.')
+
+    h = x[1] - x[0]
+    if not np.allclose(np.diff(x), h, atol=1e-9, rtol=1e-8):
+        raise ValueError('Simpson integration requires equally spaced x values.')
+
+    return h / 3 * (y[0] + y[-1] + 4 * np.sum(y[1:-1:2]) + 2 * np.sum(y[2:-1:2]))
+
+
+def mbar(u_kln, N_k=None, max_iter=10000, tol=1e-8):
+    """Compute MBAR free energies and weights from reduced potentials.
+
+    Parameters
+    ----------
+    u_kln : array_like, shape (K, N)
+        Reduced potential energies of N samples evaluated in K states.
+    N_k : array_like, shape (K,), optional
+        Number of samples drawn from each state. If omitted, samples are
+        assumed to be equally represented.
+    """
+    u_kln = np.asarray(u_kln, dtype=float)
+    K, N = u_kln.shape
+    if N_k is None:
+        N_k = np.full(K, N / K, dtype=float)
+    else:
+        N_k = np.asarray(N_k, dtype=float)
+    if np.sum(N_k) <= 0:
+        raise ValueError('N_k must contain positive sample counts for each state.')
+    N_k = N_k * (N / np.sum(N_k))
+
+    f = np.zeros(K, dtype=float)
+    for _ in range(max_iter):
+        log_denominator = logsumexp(np.log(N_k)[:, None] - f[:, None] - u_kln, axis=0)
+        g_n = -log_denominator
+        f_new = -logsumexp(g_n[None, :] - u_kln, axis=1)
+        f_new -= f_new[0]
+        if np.max(np.abs(f_new - f)) < tol:
+            f = f_new
+            break
+        f = f_new
+
+    log_w_kn = np.log(N_k)[:, None] - f[:, None] - u_kln - log_denominator[None, :]
+    weights = np.exp(log_w_kn)
+    return {
+        'f_k': f,
+        'log_weights': log_w_kn,
+        'weights': weights
+    }
+
+
+def mbar_reweighted_average(observable, weights):
+    """Compute MBAR reweighted expectations for each state."""
+    observable = np.asarray(observable, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim != 2:
+        raise ValueError('weights must be 2D with shape (K, N).')
+    if observable.shape[-1] != weights.shape[1]:
+        raise ValueError('Observable length must match number of samples.')
+    numer = np.sum(weights * observable[None, :], axis=1)
+    denom = np.sum(weights, axis=1)
+    return numer / denom

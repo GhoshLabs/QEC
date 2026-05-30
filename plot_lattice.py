@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from evaluation import failure_mode_syndromes
+from code import ToricCode
 
 class LatticePlotter:
     def __init__(self, toric_code, noise_model, syndromes=None):
@@ -90,14 +92,17 @@ class LatticePlotter:
                         ax.plot([start[0], end[0]], [start[1], end[1]], '--', color='cyan', linewidth=2.5, label=label)
                         if label: labels_added.add('Z correction')
 
-    def plot(self, corrections=None):
+    def plot(self, corrections=None, title=None):
         fig, ax = plt.subplots(figsize=(10, 10))
         L = self.toric_code.L
         # Adjust limits to see dual lattice edges at boundary
         ax.set_xlim(-1, L + 1)
         ax.set_ylim(-1, L + 1)
         ax.set_aspect('equal')
-        ax.set_title('Toric Code Lattice with Errors and Syndromes')
+        if title:
+            ax.set_title(title)
+        else:
+            ax.set_title('Toric Code Lattice with Errors and Syndromes')
         ax.set_xlabel('X-axis')
         ax.set_ylabel('Y-axis')
         ax.set_xticks(np.arange(0, L, 1))
@@ -205,3 +210,49 @@ class LatticePlotter:
             ax.legend()
 
         plt.show()
+
+def plot_failure_syndromes_on_lattice():
+    """Plots all failure mode syndromes in a single figure using only the direct lattice."""
+    code = ToricCode(L=2)
+    syndrome_list = failure_mode_syndromes(code)
+    num_syndromes = len(syndrome_list)
+
+    if num_syndromes == 0:
+        print("No failure mode syndromes found.")
+        return
+
+    cols = int(np.ceil(np.sqrt(num_syndromes)))
+    rows = int(np.ceil(num_syndromes / cols))
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.5, rows * 2.5), squeeze=False)
+    axes = axes.flatten()
+    L = code.L
+
+    for idx, (sz, sx) in enumerate(syndrome_list):
+        ax = axes[idx]
+        ax.set_aspect('equal')
+
+        # Plot direct lattice (primal grid lines)
+        for i in range(L + 1): # Iterate over grid lines
+            ax.plot([0, L], [i, i], 'k-', lw=1, alpha=0.3) # Horizontal lines
+            ax.plot([i, i], [0, L], 'k-', lw=1, alpha=0.3) # Vertical lines
+
+        # Plot defects (red dots) for X-stabilizer syndromes
+        # X-stabilizer defects (sx, caused by Z errors on edges) are on primal vertices
+        for i, s_val in enumerate(sx):
+            if s_val:
+                ax.plot(i % L, i // L, 'ro', markersize=6)
+
+        ax.set_xlim(-0.2, L + 0.2)
+        ax.set_ylim(-0.2, L + 0.2)
+        ax.axis('off')
+        ax.set_title(f"Fail {idx+1}", fontsize=9)
+
+    # Clean up empty subplots
+    for j in range(num_syndromes, len(axes)):
+        axes[j].axis('off')
+
+    plt.tight_layout()
+    save_path = "failure_mode_syndromes.pdf"
+    plt.savefig(save_path)
+    plt.close()
